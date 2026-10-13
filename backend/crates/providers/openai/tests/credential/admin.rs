@@ -24,6 +24,8 @@ use crate::support::{TestLeaseCoordinator, runtime_policy};
 
 struct UnusedRefresher;
 
+struct SuccessfulImportRefresher;
+
 #[tokio::test]
 async fn sub2api_import_resolves_distinct_proxy_bindings_and_encodes_credentials() {
     let service = CodexCredentialAdminService::new(
@@ -147,6 +149,73 @@ impl TokenRefresher for UnusedRefresher {
     async fn refresh(&self, _refresh_token: &str) -> Result<TokenPair, RefreshFailure> {
         panic!("a direct access-token import must not refresh its refresh token")
     }
+}
+
+#[async_trait]
+impl TokenRefresher for SuccessfulImportRefresher {
+    async fn refresh(&self, refresh_token: &str) -> Result<TokenPair, RefreshFailure> {
+        assert_eq!(refresh_token, "rt-only");
+        Ok(TokenPair {
+            access_token: Some(test_jwt(serde_json::json!({
+                "https://api.openai.com/auth": {"chatgpt_user_id": "refreshed-user"}
+            }))),
+            refresh_token: None,
+            id_token: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn access_token_only_import_keeps_token_without_refresh() {
+    let access_token = test_jwt(serde_json::json!({
+        "exp": (Utc::now() + chrono::Duration::days(1)).timestamp(),
+        "https://api.openai.com/auth": {"chatgpt_user_id": "at-only-user"}
+    }));
+    let service = CodexCredentialAdminService::new(
+        Arc::new(UnusedRefresher),
+        Arc::new(TestLeaseCoordinator::default()),
+        runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
+    );
+    let prepared = service
+        .prepare_import_document_with_proxy(
+            serde_json::json!({"accounts": [{"credentials": {"access_token": access_token}}]}),
+            None,
+        )
+        .await
+        .expect("unexpired AT-only account must import without refresh");
+
+    let account = prepared.accounts().first().expect("one prepared account");
+    let runtime = CodexCredentialCodec::decode(&account.credential).expect("stored credential");
+    let oauth = runtime.authentication.oauth().expect("OAuth credential");
+    assert!(oauth.refresh_token.is_none());
+    assert_eq!(account.account.upstream_user_id(), Some("at-only-user"));
+}
+
+#[tokio::test]
+async fn refresh_token_only_import_exchanges_and_keeps_original_refresh_token() {
+    let service = CodexCredentialAdminService::new(
+        Arc::new(SuccessfulImportRefresher),
+        Arc::new(TestLeaseCoordinator::default()),
+        runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
+    );
+    let prepared = service
+        .prepare_import_document_with_proxy(
+            serde_json::json!({"accounts": [{"credentials": {"refresh_token": "rt-only"}}]}),
+            None,
+        )
+        .await
+        .expect("RT-only account must import after a successful exchange");
+
+    let account = prepared.accounts().first().expect("one prepared account");
+    let runtime = CodexCredentialCodec::decode(&account.credential).expect("stored credential");
+    let oauth = runtime.authentication.oauth().expect("OAuth credential");
+    assert_eq!(account.account.upstream_user_id(), Some("refreshed-user"));
+    assert_eq!(
+        oauth.refresh_token.as_ref().map(|token| token.expose_secret()),
+        Some("rt-only")
+    );
 }
 
 #[tokio::test]
