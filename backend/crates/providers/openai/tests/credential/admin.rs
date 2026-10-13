@@ -213,7 +213,10 @@ async fn refresh_token_only_import_exchanges_and_keeps_original_refresh_token() 
     let oauth = runtime.authentication.oauth().expect("OAuth credential");
     assert_eq!(account.account.upstream_user_id(), Some("refreshed-user"));
     assert_eq!(
-        oauth.refresh_token.as_ref().map(|token| token.expose_secret()),
+        oauth
+            .refresh_token
+            .as_ref()
+            .map(|token| token.expose_secret()),
         Some("rt-only")
     );
 }
