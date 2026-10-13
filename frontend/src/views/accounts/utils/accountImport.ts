@@ -16,14 +16,31 @@ function parseJson(value: string): unknown {
   }
 }
 
+function splitAccountDocuments(entry: AccountImportDocument): AccountImportDocument[] {
+  if (!isSupportedProvider(entry.provider))
+    return [entry]
+  const document = entry.document
+  const data = entry.provider === 'openai' && isRecord(document.data) && Array.isArray(document.data.accounts)
+    ? document.data
+    : document
+  if (!Array.isArray(data.accounts) || !data.accounts.length)
+    return [entry]
+  return data.accounts.map(account => ({
+    provider: entry.provider,
+    document: data === document
+      ? { ...document, accounts: [account] }
+      : { ...document, data: { ...data, accounts: [account] } },
+  }))
+}
+
 export function mixedImportDocuments(text: string): AccountImportDocument[] {
   const value = parseJson(text)
   if (!isRecord(value) || !Array.isArray(value.documents))
     throw new Error('批量导入文件必须是 CPR 多平台导出文件')
-  const documents = value.documents.map((entry): AccountImportDocument => {
+  const documents = value.documents.flatMap((entry): AccountImportDocument[] => {
     if (!isRecord(entry) || typeof entry.provider !== 'string' || !entry.provider.trim() || !isRecord(entry.document))
       throw new Error('批量导入文件包含无效的 Provider 文档')
-    return { provider: entry.provider, document: entry.document }
+    return splitAccountDocuments({ provider: entry.provider, document: entry.document })
   })
   if (!documents.length)
     throw new Error('批量文件没有可导入的账号文档')
@@ -49,5 +66,5 @@ export function accountImportDocuments(provider: string, mode: string, text: str
   }
   if (!isRecord(value))
     throw new Error('导入文件必须是 JSON 对象')
-  return [{ provider, document: value }]
+  return splitAccountDocuments({ provider, document: value })
 }

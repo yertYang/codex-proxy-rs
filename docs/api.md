@@ -871,8 +871,9 @@ OAuth 等待回调期间不持有保护；提交仍拒绝已删除或连接配�
 
 每个任务接受 1–200 个 `items`，请求体上限为 4 MiB。每个条目遵循下节的 Provider 文档与设置合同，独立处理
 并返回结果。批量 AT / RT 按非空输入顺序拆成单账号条目，因此可逐条统计；
-JSON 文件按 Provider 文档分项，不拆解内部代理引用或改变 Provider 对文档的原子性与部分成功语义。
-一个文档可导入多个账号，条目成功数与入库账号数可能不同
+管理端上传的内置平台 JSON 文件按 `accounts` 数组拆成单账号条目，每项保留原文档中的代理引用，
+成功与失败分别记录；插件文档及直接调用导入 API 的多账号文档仍由 Provider 按自身语义处理。
+一个未拆分的文档可导入多个账号，条目成功数与入库账号数可能不同
 
 摘要字段为 `taskId`、`createdAt`、`finishedAt`（未结束为 null）、`stopRequested`、`total`、`counts`。
 `counts` 包含 `pending`、`running`、`succeeded`、`failed`、`unknown`、`skipped` 和 `importedAccounts`。
@@ -902,7 +903,7 @@ JSON 文件按 Provider 文档分项，不拆解内部代理引用或改变 Prov
 - OpenAI OAuth token 字段接受 `accessToken`、`refreshToken`、`idToken`，以及官方
   `auth.json` 中的 `access_token`、`refresh_token`、`id_token`，可以嵌套在 `tokens` 等账号 object 内；
   每项至少包含 AT 或 RT。仅含 `OPENAI_API_KEY` 的客户端代理配置不是 OAuth 账号导入材料；
-  RT-only 会在导入时换取 AT，AT-only 不具备自动续期能力
+  RT-only 会在导入时换取 AT，已知过期的 AT-only 会拒绝导入，其他 AT-only 不具备自动续期能力
 - OpenAI 与 xAI 的账号条目接受 `outboundProxyUrl`；OpenAI 还会解析 sub2api 的 `proxy_key` 和顶层 `proxies`。
   代理在 token 刷新前绑定。缺失、重复、停用、带到期时间或配置回退策略的 sub2api 代理会拒绝导入
 - xAI 从单账号 object 或 `accounts` 数组中提取 OAuth token；并发、优先级等字段不参与认证

@@ -281,6 +281,28 @@ async fn direct_import_projects_access_token_jwt_expiry_without_persisting_refre
     assert!(account.account.next_refresh_at().is_none());
 }
 
+#[tokio::test]
+async fn expired_access_token_without_refresh_token_is_not_imported() {
+    let access_token = test_jwt(serde_json::json!({
+        "exp": 1_600_000_000,
+        "https://api.openai.com/auth": {"chatgpt_user_id": "expired-user"}
+    }));
+    let service = CodexCredentialAdminService::new(
+        Arc::new(UnusedRefresher),
+        Arc::new(TestLeaseCoordinator::default()),
+        runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
+    );
+    let result = service
+        .prepare_import_document_with_proxy(serde_json::json!({"accessToken": access_token}), None)
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(provider_openai::credential::CodexCredentialAdminError::InvalidCredential)
+    ));
+}
+
 fn test_jwt(payload: serde_json::Value) -> String {
     format!(
         "unverified-header.{}.unverified-signature",
